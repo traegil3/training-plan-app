@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive New Hire Training Plan</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Chosen Palette: Calm Harmony -->
+    <!-- Application Structure Plan: The application is designed with a dual-view structure to serve different user needs. The default "Weekly Timeline" view provides a chronological, task-oriented checklist for the new hire to follow day-by-day. The "Skills Dashboard" view offers a thematic, at-a-glance summary for managers and trainers to quickly assess proficiency across different technologies. This structure is more usable than a static list because it separates the 'doing' (timeline) from the 'evaluating' (dashboard). User interaction is centered around checkboxes, which drive all progress visualizations, creating a unified and intuitive experience. The addition of LLM-powered features further enhances the app by providing on-demand learning and project generation. -->
+    <!-- Visualization & Content Choices: Report Info: Training tasks per week/tool. -> Goal: Track progress, motivate, and summarize. -> Viz/Presentation Method: Interactive timeline with checkboxes, progress bars, and a summary donut chart. -> Interaction: Clicking checkboxes updates a central JS data object, which in turn dynamically updates all progress bars and the chart. -> Justification: Checkboxes are intuitive for task completion. Progress bars offer immediate visual feedback. The donut chart provides a high-level summary of the training focus. The new 'Expand' button uses the Gemini API to generate a detailed explanation of a skill, while the 'Generate Project' button creates a personalized project based on completed skills. -> Library/Method: Vanilla JS for logic, Chart.js for the donut chart (Canvas), Tailwind CSS for layout/styling, and the Gemini API for LLM functionality. -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8f7f4;
+            color: #4a4a4a;
+        }
+        .progress-bar-bg {
+            background-color: #e0e0e0;
+        }
+        .progress-bar-fill {
+            background-color: #4caf50;
+            transition: width 0.5s ease-in-out;
+        }
+        .tab-active {
+            border-bottom-color: #4caf50;
+            color: #1a1a1a;
+            font-weight: 600;
+        }
+        .tab-inactive {
+            border-bottom-color: transparent;
+            color: #6b7280;
+        }
+        .task-item:hover {
+            background-color: #f0fdf4;
+        }
+        .task-item input:checked + label {
+            text-decoration: line-through;
+            color: #9ca3af;
+        }
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 400px;
+            margin-left: auto;
+            margin-right: auto;
+            height: 40vh;
+            max-height: 400px;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgb(0,0,0);
+            background-color: rgba(0,0,0,0.4);
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-content {
+            background-color: #fefefe;
+            padding: 24px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            max-width: 80%;
+            margin: auto;
+            position: relative;
+        }
+        .close-button {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            line-height: 1;
+        }
+        .close-button:hover,
+        .close-button:focus {
+            color: #000;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border-left-color: #4caf50;
+            animation: spin 1s ease infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="antialiased">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-gray-800">New Hire IT Training Plan</h1>
+            <p class="text-gray-500 mt-2">An interactive guide to your first four weeks.</p>
+        </header>
+
+        <div class="bg-white rounded-xl shadow-lg p-6 mb-8">
+            <h2 class="text-xl font-semibold mb-4 text-gray-700">Overall Progress</h2>
+            <div class="progress-bar-bg w-full rounded-full h-4 overflow-hidden">
+                <div id="overall-progress-bar" class="progress-bar-fill h-4 rounded-full" style="width: 0%;"></div>
+            </div>
+            <p id="overall-progress-text" class="text-right text-sm font-medium mt-2 text-gray-600">0% Complete</p>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-lg">
+            <div class="border-b border-gray-200">
+                <nav class="flex -mb-px px-6" aria-label="Tabs">
+                    <button id="tab-timeline" class="py-4 px-1 border-b-2 text-sm font-medium tab-active">Weekly Timeline</button>
+                    <button id="tab-dashboard" class="py-4 px-1 border-b-2 text-sm font-medium tab-inactive ml-8">Skills Dashboard</button>
+                </nav>
+            </div>
+
+            <div id="view-timeline" class="p-6">
+                <!-- Timeline content will be generated by JS -->
+            </div>
+
+            <div id="view-dashboard" class="p-6 hidden">
+                 <div class="text-center mb-8">
+                    <h3 class="text-2xl font-semibold text-gray-800">Training Focus Breakdown</h3>
+                    <p class="text-gray-500 mt-1">This chart shows the distribution of training tasks across different tool categories.</p>
+                </div>
+                <div class="chart-container mb-12">
+                    <canvas id="focusChart"></canvas>
+                </div>
+                <div id="dashboard-content" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <!-- Dashboard content will be generated by JS -->
+                </div>
+                 <div class="bg-white rounded-xl shadow-lg p-6 mt-8">
+                    <h2 class="text-xl font-semibold mb-4 text-gray-700">Practice with a Project ✨</h2>
+                    <p class="text-gray-500 mb-4">Click below to generate a new, hands-on mini-project based on the skills you have completed so far.</p>
+                    <button id="generate-project-btn" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg">✨ Generate Project</button>
+                    <div id="project-output" class="mt-4 p-4 border border-gray-200 rounded-lg hidden"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- The Modal -->
+    <div id="myModal" class="modal">
+        <div class="modal-content">
+            <span class="close-button">&times;</span>
+            <div id="modal-content-text"></div>
+        </div>
+    </div>
+
+<script>
+    const trainingData = [
+        { id: 'w1d1_1', week: 1, days: '1-2', category: 'Foundational', tool: 'macOS', task: 'Walkthrough of the macOS desktop (Dock, Menu Bar, Finder).', completed: false },
+        { id: 'w1d1_2', week: 1, days: '1-2', category: 'Foundational', tool: 'macOS', task: 'File and folder management best practices.', completed: false },
+        { id: 'w1d1_3', week: 1, days: '1-2', category: 'Foundational', tool: 'macOS', task: 'Basic keyboard shortcuts.', completed: false },
+        { id: 'w1d1_4', week: 1, days: '1-2', category: 'Foundational', tool: 'Google Workspace', task: 'Log in and account security (MFA setup).', completed: false },
+        { id: 'w1d1_5', week: 1, days: '1-2', category: 'Foundational', tool: 'Google Workspace', task: 'Gmail basics (inbox organization, filters).', completed: false },
+        { id: 'w1d1_6', week: 1, days: '1-2', category: 'Foundational', tool: 'Google Workspace', task: 'Google Drive overview (creating, sharing, and organizing files).', completed: false },
+        { id: 'w1d1_7', week: 1, days: '1-2', category: 'Foundational', tool: 'Slack', task: 'Workspace tour: channels, direct messages, and threads.', completed: false },
+        { id: 'w1d1_8', week: 1, days: '1-2', category: 'Foundational', tool: 'Slack', task: 'Notifications and status settings.', completed: false },
+        { id: 'w1d1_9', week: 1, days: '1-2', category: 'Foundational', tool: 'Slack', task: 'Introduction to key company channels.', completed: false },
+        
+        { id: 'w1d3_1', week: 1, days: '3-5', category: 'Foundational', tool: 'General IT', task: 'Install core applications (e.g., Google Chrome, Slack, text editor).', completed: false },
+        { id: 'w1d3_2', week: 1, days: '3-5', category: 'Foundational', tool: 'General IT', task: 'Understand how to use the App Store vs. web downloads.', completed: false },
+        { id: 'w1d3_3', week: 1, days: '3-5', category: 'Foundational', tool: 'Jamf', task: 'Introduction to Jamf Self Service for application downloads.', completed: false },
+        { id: 'w1d3_4', week: 1, days: '3-5', category: 'Foundational', tool: 'Google Workspace', task: 'Google Calendar management (scheduling meetings, using conference rooms).', completed: false },
+        { id: 'w1d3_5', week: 1, days: '3-5', category: 'Foundational', tool: 'Google Workspace', task: 'Collaborating on Google Docs and Sheets.', completed: false },
+        { id: 'w1d3_6', week: 1, days: '3-5', category: 'Foundational', tool: 'Google Workspace', task: 'Introduction to Google Meet for video conferencing.', completed: false },
+        { id: 'w1d3_7', week: 1, days: '3-5', category: 'Foundational', tool: 'macOS', task: 'Setting up a secure password and screen lock.', completed: false },
+        { id: 'w1d3_8', week: 1, days: '3-5', category: 'Foundational', tool: 'macOS', task: 'Performing a macOS update.', completed: false },
+        { id: 'w1d3_9', week: 1, days: '3-5', category: 'Foundational', tool: 'macOS', task: 'Introduction to the importance of Time Machine backups.', completed: false },
+
+        { id: 'w2d6_1', week: 2, days: '6-7', category: 'Intermediate', tool: 'Jamf', task: 'Log in and navigate the Jamf Pro dashboard.', completed: false },
+        { id: 'w2d6_2', week: 2, days: '6-7', category: 'Intermediate', tool: 'Jamf', task: 'Understand key concepts: Policies, Configuration Profiles, and Scripts.', completed: false },
+        { id: 'w2d6_3', week: 2, days: '6-7', category: 'Intermediate', tool: 'Jamf', task: 'Review existing policies and how they are applied.', completed: false },
+        { id: 'w2d6_4', week: 2, days: '6-7', category: 'Intermediate', tool: 'Jamf', task: 'Walkthrough the process of enrolling a device in Jamf.', completed: false },
+        { id: 'w2d6_5', week: 2, days: '6-7', category: 'Intermediate', tool: 'Jamf', task: 'Review inventory for a new device.', completed: false },
+        { id: 'w2d6_6', week: 2, days: '6-7', category: 'Intermediate', tool: 'Jamf', task: 'Use Jamf to deploy a pre-packaged application.', completed: false },
+
+        { id: 'w2d8_1', week: 2, days: '8-10', category: 'Intermediate', tool: 'Okta', task: 'Walkthrough the Okta dashboard and the concept of Single Sign-On (SSO).', completed: false },
+        { id: 'w2d8_2', week: 2, days: '8-10', category: 'Intermediate', tool: 'Okta', task: 'Review how to enroll a new MFA factor.', completed: false },
+        { id: 'w2d8_3', week: 2, days: '8-10', category: 'Intermediate', tool: 'Okta', task: 'Practice using Okta to log in to various applications.', completed: false },
+        { id: 'w2d8_4', week: 2, days: '8-10', category: 'Intermediate', tool: 'Okta', task: 'Navigate the Okta Admin Console.', completed: false },
+        { id: 'w2d8_5', week: 2, days: '8-10', category: 'Intermediate', tool: 'Okta', task: 'Understand user and group management (creating, suspending, deactivating users).', completed: false },
+        { id: 'w2d8_6', week: 2, days: '8-10', category: 'Intermediate', tool: 'Okta', task: 'Review how user provisioning works for a key application.', completed: false },
+
+        { id: 'w3d11_1', week: 3, days: '11-12', category: 'Advanced', tool: 'Atlassian', task: 'Learn how to navigate and use a Jira project.', completed: false },
+        { id: 'w3d11_2', week: 3, days: '11-12', category: 'Advanced', tool: 'Atlassian', task: 'Create, manage, and transition an issue (e.g., an IT ticket).', completed: false },
+        { id: 'w3d11_3', week: 3, days: '11-12', category: 'Advanced', tool: 'Atlassian', task: 'Understand different issue types and workflows.', completed: false },
+        { id: 'w3d11_4', week: 3, days: '11-12', category: 'Advanced', tool: 'Atlassian', task: 'Navigate Confluence spaces to find knowledge base articles.', completed: false },
+        { id: 'w3d11_5', week: 3, days: '11-12', category: 'Advanced', tool: 'Atlassian', task: 'Practice creating a basic page and using templates.', completed: false },
+        { id: 'w3d11_6', week: 3, days: '11-12', category: 'Advanced', tool: 'Atlassian', task: 'Introduction to JQL for searching and filtering issues.', completed: false },
+        
+        { id: 'w3d13_1', week: 3, days: '13-15', category: 'Advanced', tool: 'Palo Alto Networks', task: 'Understand the purpose of a Next-Generation Firewall.', completed: false },
+        { id: 'w3d13_2', week: 3, days: '13-15', category: 'Advanced', tool: 'Palo Alto Networks', task: 'Review the basics of security policies, App-ID, and User-ID.', completed: false },
+        { id: 'w3d13_3', week: 3, days: '13-15', category: 'Advanced', tool: 'Palo Alto Networks', task: 'Read-only access to the Palo Alto management interface.', completed: false },
+        { id: 'w3d13_4', week: 3, days: '13-15', category: 'Advanced', tool: 'Palo Alto Networks', task: 'Practice generating and viewing traffic logs.', completed: false },
+        { id: 'w3d13_5', week: 3, days: '13-15', category: 'Advanced', tool: 'Palo Alto Networks', task: 'Learn how to check for firewall policy hits for a specific user.', completed: false },
+
+        { id: 'w4d16_1', week: 4, days: '16-17', category: 'Procurement', tool: 'Computer Ordering', task: 'Review the process of requesting and placing an order with CDW or Apple.', completed: false },
+        { id: 'w4d16_2', week: 4, days: '16-17', category: 'Procurement', tool: 'Computer Ordering', task: 'Learn how to track the order status and shipping.', completed: false },
+        { id: 'w4d16_3', week: 4, days: '16-17', category: 'Procurement', tool: 'Computer Ordering', task: 'Understand how to check for pre-configuration services (e.g., ABM/DEP).', completed: false },
+        { id: 'w4d16_4', week: 4, days: '16-17', category: 'Procurement', tool: 'Computer Ordering', task: 'Understand the process for fulfilling a device request through Allwhere.', completed: false },
+        { id: 'w4d16_5', week: 4, days: '16-17', category: 'Procurement', tool: 'Computer Ordering', task: 'Review how to track a device\'s journey from order to delivery.', completed: false },
+
+        { id: 'w4d18_1', week: 4, days: '18-20', category: 'Project Work', tool: 'Review', task: 'Assign a small, hands-on project that incorporates multiple tools.', completed: false },
+        { id: 'w4d18_2', week: 4, days: '18-20', category: 'Project Work', tool: 'Review', task: 'Open forum for the new hire to ask questions.', completed: false },
+        { id: 'w4d18_3', week: 4, days: '18-20', category: 'Project Work', tool: 'Review', task: 'Review all training topics.', completed: false },
+        { id: 'w4d18_4', week: 4, days: '18-20', category: 'Project Work', tool: 'Review', task: 'Work with the new hire to document their training experience and improve the plan for future new hires.', completed: false },
+    ];
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const timelineView = document.getElementById('view-timeline');
+        const dashboardView = document.getElementById('view-dashboard');
+        const dashboardContent = document.getElementById('dashboard-content');
+        const tabTimeline = document.getElementById('tab-timeline');
+        const tabDashboard = document.getElementById('tab-dashboard');
+        const modal = document.getElementById('myModal');
+        const modalContentText = document.getElementById('modal-content-text');
+        const closeModalBtn = document.getElementsByClassName("close-button")[0];
+        const generateProjectBtn = document.getElementById('generate-project-btn');
+        const projectOutput = document.getElementById('project-output');
+
+        const goals = {
+            1: "Master the core tools used for daily work and communication.",
+            2: "Understand core device and identity management tools.",
+            3: "Learn how to use core operational and security tools.",
+            4: "Understand the procurement process and apply learned skills in a practical setting."
+        };
+
+        async function callGeminiAPI(prompt) {
+            modal.style.display = "flex";
+            modalContentText.innerHTML = '<div class="flex flex-col items-center justify-center p-8"><div class="spinner"></div><p class="mt-4 text-gray-500">Generating content...</p></div>';
+
+            const apiKey = "";
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+            const payload = {
+                contents: [{ parts: [{ text: prompt }] }],
+            };
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const result = await response.json();
+                const text = result?.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (text) {
+                    modalContentText.innerHTML = `<h3 class="text-xl font-semibold mb-2">Skill Breakdown</h3><p class="text-gray-700">${text}</p>`;
+                } else {
+                    modalContentText.innerHTML = `<p class="text-red-500">Error: Could not retrieve a response.</p>`;
+                }
+            } catch (error) {
+                modalContentText.innerHTML = `<p class="text-red-500">Error: ${error.message}</p>`;
+            }
+        }
+
+        async function generateProject() {
+            projectOutput.classList.remove('hidden');
+            projectOutput.innerHTML = '<div class="flex flex-col items-center justify-center p-8"><div class="spinner"></div><p class="mt-4 text-gray-500">Generating project idea...</p></div>';
+            
+            const completedSkills = trainingData.filter(t => t.completed).map(t => `${t.task} (${t.tool})`).join(', ');
+
+            if (completedSkills.length === 0) {
+                 projectOutput.innerHTML = '<p class="text-gray-500 text-center">Complete some tasks first to get a project idea!</p>';
+                 return;
+            }
+
+            const prompt = `Create a concise, hands-on IT mini-project that a new hire can complete to practice the following skills: ${completedSkills}. The project should be practical and involve multiple tools if possible. Provide a title and a list of steps.`;
+
+            const apiKey = "";
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+            const payload = {
+                contents: [{ parts: [{ text: prompt }] }],
+            };
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const result = await response.json();
+                const text = result?.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (text) {
+                    projectOutput.innerHTML = `<h3 class="text-lg font-semibold mb-2">Generated Project</h3><div class="prose max-w-none">${text.replace(/\n/g, '<br>')}</div>`;
+                } else {
+                    projectOutput.innerHTML = `<p class="text-red-500">Error: Could not retrieve a project idea.</p>`;
+                }
+            } catch (error) {
+                projectOutput.innerHTML = `<p class="text-red-500">Error: ${error.message}</p>`;
+            }
+        }
+
+        function renderTimeline() {
+            let html = '';
+            for (let i = 1; i <= 4; i++) {
+                const weekTasks = trainingData.filter(t => t.week === i);
+                const dayGroups = [...new Set(weekTasks.map(t => t.days))];
+                
+                html += `
+                    <div class="mb-8 p-4 border border-gray-200 rounded-lg">
+                        <h3 class="text-2xl font-semibold text-gray-800">Week ${i}</h3>
+                        <p class="text-gray-500 mb-4">${goals[i]}</p>
+                        ${dayGroups.map(day => `
+                            <div class="mt-4">
+                                <h4 class="text-lg font-semibold text-gray-700 mb-2 border-b pb-1">Days ${day}</h4>
+                                <ul class="space-y-2">
+                                    ${weekTasks.filter(t => t.days === day).map(task => `
+                                        <li class="task-item flex items-center p-2 rounded-md">
+                                            <input type="checkbox" id="${task.id}" data-id="${task.id}" class="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-500" ${task.completed ? 'checked' : ''}>
+                                            <label for="${task.id}" class="ml-3 block text-sm font-medium text-gray-700">${task.task}</label>
+                                            <button data-task="${task.task}" class="ml-auto bg-blue-500 hover:bg-blue-600 text-white font-bold text-xs py-1 px-2 rounded-full">✨ Expand</button>
+                                        </li>
+                                    `).join('')}
+                                </ul>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+            timelineView.innerHTML = html;
+        }
+
+        function renderDashboard() {
+            const tools = [...new Set(trainingData.map(t => t.tool))];
+            let html = '';
+
+            tools.forEach(tool => {
+                const toolTasks = trainingData.filter(t => t.tool === tool);
+                const completedTasks = toolTasks.filter(t => t.completed).length;
+                const totalTasks = toolTasks.length;
+                const percentage = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+
+                html += `
+                    <div class="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                        <h4 class="font-bold text-lg text-gray-800">${tool}</h4>
+                        <p class="text-sm text-gray-500 mb-3">${completedTasks} / ${totalTasks} tasks completed</p>
+                        <div class="progress-bar-bg w-full rounded-full h-2.5">
+                            <div class="progress-bar-fill h-2.5 rounded-full" style="width: ${percentage}%;"></div>
+                        </div>
+                    </div>
+                `;
+            });
+            dashboardContent.innerHTML = html;
+        }
+        
+        function renderChart() {
+            const ctx = document.getElementById('focusChart').getContext('2d');
+            const categories = [...new Set(trainingData.map(item => item.category))];
+            const data = categories.map(category => {
+                return trainingData.filter(item => item.category === category).length;
+            });
+            
+            const backgroundColors = [
+                'rgba(75, 192, 192, 0.6)',
+                'rgba(255, 159, 64, 0.6)',
+                'rgba(255, 99, 132, 0.6)',
+                'rgba(54, 162, 235, 0.6)',
+                'rgba(153, 102, 255, 0.6)'
+            ];
+
+            new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: categories,
+                    datasets: [{
+                        label: 'Tasks per Category',
+                        data: data,
+                        backgroundColor: backgroundColors,
+                        borderColor: backgroundColors.map(color => color.replace('0.6', '1')),
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.parsed !== null) {
+                                        label += context.parsed + ' tasks';
+                                    }
+                                    return label;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+
+        function updateProgress() {
+            const totalTasks = trainingData.length;
+            const completedTasks = trainingData.filter(t => t.completed).length;
+            const percentage = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+
+            const progressBar = document.getElementById('overall-progress-bar');
+            const progressText = document.getElementById('overall-progress-text');
+
+            progressBar.style.width = `${percentage}%`;
+            progressText.textContent = `${percentage}% Complete`;
+
+            if (document.body.contains(dashboardContent)) {
+                 renderDashboard();
+            }
+        }
+
+        timelineView.addEventListener('change', (e) => {
+            if (e.target.type === 'checkbox') {
+                const taskId = e.target.dataset.id;
+                const task = trainingData.find(t => t.id === taskId);
+                if (task) {
+                    task.completed = e.target.checked;
+                    updateProgress();
+                }
+            }
+        });
+        
+        timelineView.addEventListener('click', (e) => {
+            if (e.target.tagName === 'BUTTON' && e.target.dataset.task) {
+                const task = e.target.dataset.task;
+                const prompt = `Explain the following IT skill in detail for a new hire, including its purpose, importance, and a practical example: ${task}`;
+                callGeminiAPI(prompt);
+            }
+        });
+
+        tabTimeline.addEventListener('click', () => {
+            timelineView.classList.remove('hidden');
+            dashboardView.classList.add('hidden');
+            tabTimeline.classList.add('tab-active');
+            tabTimeline.classList.remove('tab-inactive');
+            tabDashboard.classList.add('tab-inactive');
+            tabDashboard.classList.remove('tab-active');
+        });
+
+        tabDashboard.addEventListener('click', () => {
+            dashboardView.classList.remove('hidden');
+            timelineView.classList.add('hidden');
+            tabDashboard.classList.add('tab-active');
+            tabDashboard.classList.remove('tab-inactive');
+            tabTimeline.classList.add('tab-inactive');
+            tabTimeline.classList.remove('tab-active');
+        });
+        
+        closeModalBtn.addEventListener('click', () => {
+            modal.style.display = "none";
+        });
+        
+        window.addEventListener('click', (event) => {
+            if (event.target == modal) {
+                modal.style.display = "none";
+            }
+        });
+        
+        generateProjectBtn.addEventListener('click', generateProject);
+
+        renderTimeline();
+        renderDashboard();
+        renderChart();
+        updateProgress();
+    });
+</script>
+
+</body>
+</html>
